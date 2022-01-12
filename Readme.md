@@ -4,8 +4,8 @@ Installation:
 * create conda environment: `conda env create -f improc.yml`
 
 * correct installation path:
-   - in Split_Align_convert_GUI.py: `scripts_root = 'd:\\Trafficking_proc\\BatchSAT\\'`
-   - proc_align.bat: `d:\Trafficking_proc\BatchSAT\`
+   - in Split_Align_convert_GUI.py: `scripts_root = 'd:\\Trafficking_proc\\BatchSAC\\'`
+   - proc_align.bat: `d:\Trafficking_proc\BatchSAC\`
    
 * correct LTS path: 
    - proc_align.bat: `set bindir=c:\VivoFollow\bin\`

@@ -28,7 +28,7 @@ ch_names = [
     "[8FarFarRED]",
 ]
 
-scripts_root = 'd:\\Trafficking_proc\\BatchSAT\\'
+scripts_root = 'd:\\Trafficking_proc\\BatchSAC\\'
 
 def get_channels_times(path):
     list_of_files_path = glob.glob(path+'\*.tif')
