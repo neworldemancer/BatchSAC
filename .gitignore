@@ -1,1 +1,7 @@
 *.pyc
+*.bak
+*.log
+.idea/
+DistCorr_src/
+????d????
+/.python-version
