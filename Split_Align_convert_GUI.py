@@ -11,6 +11,7 @@ import json
 import datetime
 
 import npy2bdv
+import time
 import sys
 import re
 import wx
@@ -138,11 +139,12 @@ def recombine_multiposition(root_dir, pref, doc, n_pos, move=True):
 def convert_to_h5(ds_dir, doc, res=(1,1,1), comp=False):
     ch_map, n_chs, n_times = get_channels_times(ds_dir)
 
-    o_tif_fn = os.path.dirname(get_im_name(ds_dir, doc, 0, 0, ch_map)) + '.h5'
-
-    bdv_writer = npy2bdv.BdvWriter(o_tif_fn, nchannels=n_chs, subsamp=((1, 1, 1),),
+    o_fn = os.path.dirname(get_im_name(ds_dir, doc, 0, 0, ch_map)) + '.h5'
+    bdv_writer = npy2bdv.BdvWriter(o_fn, nchannels=n_chs, subsamp=((1, 1, 1),),
+                                   blockdim=((32, 128, 128),),
                                    compression='gzip' if comp else None)
 
+    t0 = time.perf_counter()
     for t_idx in range(n_times):
         for ch_idx in range(n_chs):
             stack = iio.read_mp_tiff(get_im_name(ds_dir, doc, ch_idx, t_idx, ch_map))
@@ -151,6 +153,7 @@ def convert_to_h5(ds_dir, doc, res=(1,1,1), comp=False):
 
     bdv_writer.write_xml()
     bdv_writer.close()
+    print(f'\ndone in {time.perf_counter() - t0:.1f}s')
 
 
 def convert_to_h5_tmpl(ds_dir_wc, doc, res=(1,1,1), comp=False):
@@ -163,7 +166,7 @@ def convert_to_h5_tmpl(ds_dir_wc, doc, res=(1,1,1), comp=False):
     ds_dir = ds_dir_arr[-1]
 
     try:
-        convert_to_h5(ds_dir, doc, comp=True, res=res)
+        convert_to_h5(ds_dir, doc, comp=comp, res=res)
     except Exception as e:
         print(e)
 
@@ -243,7 +246,7 @@ def gen_run_align_bat(run_root, run, date, doc, n_tiles,
             dsname   = f'{date}_Doc1_{doc}'
             cfg_path = gen_dataset_cfg(workdir, dsname, runname,
                                        ref_channel_idx, ref_ch_name, ch_id_map,
-                                       crop_ofs, crop_size, out_dir=run_dir)
+                                       crop_ofs, crop_size, out_dir=run_dir, output_ts=ts)
             bat += f'call %proc_align% "{cfg_path}"\n'
 
         bat += 'popd\n'
