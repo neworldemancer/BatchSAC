@@ -9,6 +9,7 @@ import shutil
 import glob
 import json
 import datetime
+import traceback
 
 import npy2bdv
 import time
@@ -19,6 +20,7 @@ import subprocess
 from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg
 from matplotlib.figure import Figure
 from matplotlib.widgets import RectangleSelector
+from utils.channel_info import get_dataset_channel_info
 
 
 def get_dir(root_dir, pref, doc, pos=None):
@@ -39,40 +41,8 @@ scripts_root = os.path.dirname(os.path.abspath(__file__))
 
 
 def get_channels_times(path):
-    list_of_files_path = glob.glob(path+r'\*.tif')
-    list_of_files = [os.path.basename(fp).split('.')[0] for fp in list_of_files_path]
-
-    if len(list_of_files) == 0:
-        return None
-    idx_time = 0
-    idx_ch = 0
-    idx_chI = 0
-    all_parts = list_of_files[0].split(' ')
-    for p_idx, part in enumerate(all_parts):
-        if '[' in part:
-            idx_ch = p_idx
-        if 'Time' in part:
-            idx_time = p_idx
-        if '_C' in part:
-            idx_chI = p_idx
-
-    channels = [f.split(' ')[idx_ch] for f in list_of_files]
-
-    channelsI = [f.split(' ')[idx_chI] for f in list_of_files]
-    channelsI = [f.split('_')[1] for f in channelsI]
-    channelsI = [int(f.split('C')[1]) for f in channelsI]
-
-    ch_id_map = {ch_idx: ch_n for ch_n, ch_idx in zip(channels, channelsI)}
-
-    times = [f.split(' ')[idx_time] for f in list_of_files]
-    times = set(times)
-    times = list(times)
-    times = [int(t.split('Time')[1]) for t in times]
-
-    n_t = np.max(times)+1
-    n_ch = np.max(channelsI)+1
-
-    return ch_id_map, n_ch, n_t
+    ch_id_map, ch_ids, time_ids = get_dataset_channel_info(path)
+    return ch_id_map, ch_ids, time_ids
 
 
 def get_im_name(ds_dir, doc, ch_idx, t_idx, ch_map):
@@ -89,14 +59,14 @@ def split_multiposition(root_dir, pref, doc, n_pos):
             os.makedirs(pos_path, exist_ok=True)
 
         path = get_dir(root_dir, pref, doc)
-        ch_map, n_chs, n_times = get_channels_times(path)
-        print(ch_map, n_chs, n_times)
+        ch_map, ch_ids, time_ids = get_channels_times(path)
+        print(ch_map, len(ch_ids), len(time_ids))
 
-        for t_idx in range(n_times):
-            pos_idx = t_idx % n_pos
-            pos_t = t_idx // n_pos
+        for out_t_idx, t_idx in enumerate(time_ids):
+            pos_idx = out_t_idx % n_pos
+            pos_t = out_t_idx // n_pos
 
-            for ch_idx in range(n_chs):
+            for ch_idx in ch_ids:
                 im_f = get_im_name(path, doc, ch_idx, t_idx, ch_map)
                 im_fp = get_im_name(mpos_path[pos_idx], doc, ch_idx, pos_t, ch_map)
                 if not os.path.exists(im_f):
@@ -108,6 +78,7 @@ def split_multiposition(root_dir, pref, doc, n_pos):
                     shutil.copy(im_f, im_fp)
     except Exception as e:
         print(e)
+        traceback.print_exc()
 
 
 def recombine_multiposition(root_dir, pref, doc, n_pos, move=True):
@@ -116,15 +87,15 @@ def recombine_multiposition(root_dir, pref, doc, n_pos, move=True):
         os.makedirs(pos_path, exist_ok=True)
 
     path = get_dir(root_dir, pref, doc)
-    ch_map, n_chs, n_times = get_channels_times(mpos_path[0])
-    n_times = n_times * n_pos
-    print(ch_map, n_chs, n_times)
+    ch_map, ch_ids, time_ids = get_channels_times(mpos_path[0])
+    n_times = len(time_ids) * n_pos
+    print(ch_map, len(ch_ids), n_times)
 
     for t_idx in range(n_times):
         pos_idx = t_idx % n_pos
         pos_t = t_idx // n_pos
 
-        for ch_idx in range(n_chs):
+        for ch_idx in ch_ids:
             im_f  = get_im_name(path, doc, ch_idx, t_idx, ch_map)
             im_fp = get_im_name(mpos_path[pos_idx], doc, ch_idx, pos_t, ch_map)
             if not os.path.exists(im_fp):
@@ -137,19 +108,22 @@ def recombine_multiposition(root_dir, pref, doc, n_pos, move=True):
 
 
 def convert_to_h5(ds_dir, doc, res=(1,1,1), comp=False):
-    ch_map, n_chs, n_times = get_channels_times(ds_dir)
+    ch_map, ch_ids, time_ids = get_channels_times(ds_dir)
+    if len(ch_ids) == 0 or len(time_ids) == 0:
+        raise ValueError(f'No channels or timepoints found in {ds_dir}')
 
-    o_fn = os.path.dirname(get_im_name(ds_dir, doc, 0, 0, ch_map)) + '.h5'
-    bdv_writer = npy2bdv.BdvWriter(o_fn, nchannels=n_chs, subsamp=((1, 1, 1),),
+    first_ch_idx = ch_ids[0]
+    o_fn = os.path.dirname(get_im_name(ds_dir, doc, first_ch_idx, 0, ch_map)) + '.h5'
+    bdv_writer = npy2bdv.BdvWriter(o_fn, nchannels=len(ch_ids), subsamp=((1, 1, 1),),
                                    blockdim=((32, 128, 128),),
                                    compression='gzip' if comp else None)
 
     t0 = time.perf_counter()
-    for t_idx in range(n_times):
-        for ch_idx in range(n_chs):
+    for out_t_idx, t_idx in enumerate(time_ids):
+        for out_ch_idx, ch_idx in enumerate(ch_ids):
             stack = iio.read_mp_tiff(get_im_name(ds_dir, doc, ch_idx, t_idx, ch_map))
-            bdv_writer.append_view(stack, time=t_idx, channel=ch_idx, voxel_size_xyz=res, voxel_units='um')
-        print(f'{t_idx/n_times*100:.2f} % ', end='\r')
+            bdv_writer.append_view(stack, time=out_t_idx, channel=out_ch_idx, voxel_size_xyz=res, voxel_units='um')
+        print(f'{out_t_idx/len(time_ids)*100:.2f} % ', end='\r')
 
     bdv_writer.write_xml()
     bdv_writer.close()
@@ -169,6 +143,7 @@ def convert_to_h5_tmpl(ds_dir_wc, doc, res=(1,1,1), comp=False):
         convert_to_h5(ds_dir, doc, comp=comp, res=res)
     except Exception as e:
         print(e)
+        traceback.print_exc()
 
 
 def gen_dataset_cfg(workdir, dsname, runname,
@@ -263,6 +238,7 @@ def gen_run_align_bat(run_root, run, date, doc, n_tiles,
 
     except Exception as e:
         print(e)
+        traceback.print_exc()
 
 
 class ModalWin(wx.Dialog):
@@ -300,7 +276,7 @@ class PathPanel(wx.Panel):
                 self.path.SetValue(dlg.GetPath())
             dlg.Destroy()
         except:
-            pass
+            traceback.print_exc()
 
 
 class CropSelectDialog(wx.Dialog):
@@ -711,6 +687,7 @@ def process_all(ds_list):
                            crop_ofs, crop_size)
             except Exception as e:
                 print(e)
+                traceback.print_exc()
 
 
 def run():
